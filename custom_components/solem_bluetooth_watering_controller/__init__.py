@@ -18,12 +18,13 @@ import logging
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
 from homeassistant.helpers.device_registry import DeviceEntry
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .const import DOMAIN
 from .coordinator import SolemCoordinator
+from .discovery import async_discover_station_details
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -57,6 +58,15 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: MyConfigEntry) ->
     # Initialise the coordinator that manages data updates from your api.
     # This is defined in coordinator.py
     # ----------------------------------------------------------------------------
+    if not config_entry.data.get("station_names") and config_entry.options.get("solem_api_mock") != "true":
+        try:
+            details = await async_discover_station_details(
+                hass, dict(config_entry.data), config_entry.options.get("bluetooth_timeout", 15)
+            )
+            hass.config_entries.async_update_entry(config_entry, data=details)
+        except HomeAssistantError as exc:
+            _LOGGER.warning("Station discovery failed; retaining configured stations: %s", exc)
+
     coordinator = SolemCoordinator(hass, config_entry)
     hass.data.setdefault(DOMAIN, {})[config_entry.entry_id] = coordinator
 

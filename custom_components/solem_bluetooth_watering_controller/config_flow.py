@@ -30,6 +30,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.selector import selector
 
 from .api import SolemAPI, APIConnectionError
+from .discovery import async_discover_station_details
 from .const import (
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
@@ -68,10 +69,10 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
         # ----------------------------------------------------------------------------
         mac_address = data[CONTROLLER_MAC_ADDRESS].rsplit(' - ', 1)
         _LOGGER.debug(mac_address)
-        api = SolemAPI(hass, mac_address[1], BLUETOOTH_DEFAULT_TIMEOUT)
-        await api.connect()
+        details = await async_discover_station_details(hass, data)
+        data.update(details)
         _LOGGER.debug(f"Connected to Bluetooth controller {mac_address[1]}")
-    except APIConnectionError as err:
+    except (APIConnectionError, HomeAssistantError) as err:
         raise CannotConnect from err
     return {"title": f"Solem Bluetooth Watering Controller"}
 
@@ -173,7 +174,7 @@ class SolemConfigFlow(ConfigFlow, domain=DOMAIN):
                         }
                     }
                 ),
-                vol.Required(NUM_STATIONS, default=1): (vol.All(vol.Coerce(int), vol.Clamp(min=1))),
+                vol.Required(NUM_STATIONS, default=0): vol.All(vol.Coerce(int), vol.Range(min=0, max=12)),
                 vol.Required(CONF_SENSORS): selector(
                     {"entity": {"domain": "zone"}}
                 ),
@@ -281,6 +282,7 @@ class SolemConfigFlow(ConfigFlow, domain=DOMAIN):
                 # to ensure it is accessible across all steps.
                 # ----------------------------------------------------------------------------
                 self._input_data = user_input
+                self.num_stations = user_input[NUM_STATIONS]
 
                 # Finish configuration
                 #return self.async_update_reload_and_abort(config_entry, unique_id=config_entry.unique_id, data=self._input_data, reason="reconfigure_successful")
@@ -298,7 +300,7 @@ class SolemConfigFlow(ConfigFlow, domain=DOMAIN):
             vol.Required(CONTROLLER_MAC_ADDRESS, default=config_entry.data[CONTROLLER_MAC_ADDRESS]): selector({
                 "select": {"options": options, "mode": "dropdown"}
             }),
-            vol.Required(NUM_STATIONS, default=config_entry.data[NUM_STATIONS]): vol.All(vol.Coerce(int), vol.Clamp(min=1)),
+            vol.Required(NUM_STATIONS, default=0): vol.All(vol.Coerce(int), vol.Range(min=0, max=12)),
             vol.Required(CONF_SENSORS, default=config_entry.data[CONF_SENSORS]): selector({"entity": {"domain": "zone"}}),
             vol.Optional(OPEN_WEATHER_MAP_API_KEY, default=config_entry.data.get(OPEN_WEATHER_MAP_API_KEY, "")): str,
             vol.Required(SPRINKLE_WITH_RAIN, default=config_entry.data[SPRINKLE_WITH_RAIN]): selector({

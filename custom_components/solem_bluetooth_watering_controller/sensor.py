@@ -88,6 +88,9 @@ class StateSensor(SolemBaseEntity, SensorEntity):
         if self.coordinator.controller.device_name == "Controller Status":
             attrs["schedule"] = self.coordinator.schedule
             attrs["num_stations"] = self.coordinator.num_stations
+            attrs["station_names"] = self.coordinator.config_entry.data.get("station_names", {})
+            attrs["station_count_source"] = self.coordinator.config_entry.data.get("station_count_source", "manual")
+            attrs["controller_firmware"] = self.coordinator.config_entry.data.get("controller_firmware")
         return attrs
 
 

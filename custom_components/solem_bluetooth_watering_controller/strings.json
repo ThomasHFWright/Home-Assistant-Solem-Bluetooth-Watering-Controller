@@ -7,7 +7,7 @@
       "already_in_progress": "A setup is already in progress for this integration"
     },
     "error": {
-      "cannot_connect": "Failed to connect",
+      "cannot_connect": "Could not read station details. Check Bluetooth and the station-discovery Toolkit version; enter the count manually if detection is unsupported.",
       "invalid_auth": "Invalid authentication",
       "invalid_settings": "Invalid settings",
       "unknown": "Unexpected error"
@@ -18,7 +18,7 @@
         "data": {
           "controller_mac_address": "Controller MAC Address",
           "open_weather_map_api_key": "OpenWeatherMap API Key (optional)",
-          "num_stations": "Number of stations",
+          "num_stations": "Number of stations (0 = detect automatically)",
           "sensors": "Controller location",
           "sprinkle_with_rain": "Sprinkle even when raining",
           "soil_moisture_sensor": "Soil Moisture Sensor",
@@ -29,7 +29,7 @@
         "data": {
           "controller_mac_address": "Controller MAC Address",
           "open_weather_map_api_key": "OpenWeatherMap API Key (optional)",
-          "num_stations": "Number of stations",
+          "num_stations": "Number of stations (0 = detect automatically)",
           "sensors": "Controller location",
           "sprinkle_with_rain": "Sprinkle even when raining",
           "soil_moisture_sensor": "Soil Moisture Sensor",

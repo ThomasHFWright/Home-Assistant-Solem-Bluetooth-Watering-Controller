@@ -110,7 +110,7 @@ class SolemCoordinator(DataUpdateCoordinator):
         self.stations = [
             IrrigationStation(
                 device_id=f"{self.controller_mac_address}_irrigation_station_{station_id}_status",
-                device_name=f"Station {station_id} Status",
+                device_name=f"{self.station_name(station_id)} Status",
                 device_uid="",
                 station_number=station_id,
                 software_version="1.0",
@@ -219,7 +219,7 @@ class SolemCoordinator(DataUpdateCoordinator):
         self.stations = [
             IrrigationStation(
                 device_id=f"{self.controller_mac_address}_irrigation_station_{station_id}_status",
-                device_name=f"Station {station_id} Status",
+                device_name=f"{self.station_name(station_id)} Status",
                 device_uid="",
                 station_number=station_id,
                 software_version="1.0",
@@ -231,6 +231,10 @@ class SolemCoordinator(DataUpdateCoordinator):
         await self.initialize_schedule()
         await self.async_request_refresh()
         _LOGGER.info(f"{self.controller_mac_address} - Updated Coordinator with new config.")
+
+    def station_name(self, station_id: int) -> str:
+        """Display the stored controller name while keeping station identifiers stable."""
+        return self.config_entry.data.get("station_names", {}).get(str(station_id)) or f"Station {station_id}"
 
     async def load_persistent_data(self):
         """Load persistent data from storage"""
@@ -836,7 +840,7 @@ class SolemCoordinator(DataUpdateCoordinator):
             data.append({
                 "device_id": f"{self.controller_mac_address}_water_flow_rate_{station_id}",
                 "device_type": "WATER_FLOW_NUMBER",
-                "device_name": f"Water Flow Rate {station_id}",
+                "device_name": f"{self.station_name(station_id)} Water Flow Rate",
                 "device_uid": mac_to_uuid(self.controller_mac_address, water_flow_counter),
                 "software_version": "1.0",
                 "value": self.water_flow_rate[station_id - 1],
@@ -851,7 +855,7 @@ class SolemCoordinator(DataUpdateCoordinator):
             data.append({
                 "device_id": f"{self.controller_mac_address}_irrigation_manual_start_station_{station_id}",
                 "device_type": "SPRINKLE_BUTTON",
-                "device_name": f"Sprinkle station {station_id}",
+                "device_name": f"Sprinkle {self.station_name(station_id)}",
                 "device_uid": mac_to_uuid(self.controller_mac_address, buttons_counter),
                 "software_version": "1.0",
                 "icon": "mdi:sprinkler",
@@ -864,7 +868,7 @@ class SolemCoordinator(DataUpdateCoordinator):
             data.append({
                 "device_id": f"{self.controller_mac_address}_sprinkle_total_amount_today_station_{station_id}",
                 "device_type": "SPRINKLE_TOTAL_AMOUNT_SENSOR",
-                "device_name": f"Sprinkle Total Amount Today {station_id}",
+                "device_name": f"{self.station_name(station_id)} Sprinkle Total Amount Today",
                 "device_uid": mac_to_uuid(self.controller_mac_address, sprinkle_counter),
                 "software_version": "1.0",
                 "state": round(self.sprinkle_total_amount_today[station_id - 1], 2),
@@ -878,7 +882,7 @@ class SolemCoordinator(DataUpdateCoordinator):
             data.append({
                 "device_id": f"{self.controller_mac_address}_forecasted_sprinkle_today_station_{station_id}",
                 "device_type": "FORECASTED_SPRINKLE_TODAY_SENSOR",
-                "device_name": f"Forecasted Sprinkle Today {station_id}",
+                "device_name": f"{self.station_name(station_id)} Forecasted Sprinkle Today",
                 "device_uid": mac_to_uuid(self.controller_mac_address, forecast_sprinkle_counter),
                 "software_version": "1.0",
                 "state": round(self.forecasted_sprinkle_today[station_id - 1], 2),

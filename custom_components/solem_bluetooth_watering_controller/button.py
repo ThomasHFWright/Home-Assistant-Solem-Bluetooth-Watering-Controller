@@ -23,6 +23,7 @@ from homeassistant.helpers.entity import EntityCategory
 from . import MyConfigEntry
 from .base import SolemBaseEntity
 from .coordinator import SolemCoordinator
+from .discovery import async_discover_station_details
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -71,7 +72,7 @@ async def async_setup_entry(
         )
 
     # Now create the buttons.
-    async_add_entities(buttons)
+    async_add_entities([*buttons, RefreshStationDetailsButton(coordinator)])
 
 
 class SolemButtonEntity(SolemBaseEntity, ButtonEntity):
@@ -129,3 +130,27 @@ class ControllerOffButton(SolemButtonEntity):
     async def async_press(self) -> None:
         """Handle the button press."""
         asyncio.create_task(self.coordinator.turn_controller_off())
+
+
+class RefreshStationDetailsButton(ButtonEntity):
+    """Reload controller names and count without changing watering state."""
+
+    _attr_has_entity_name = True
+    _attr_name = "Refresh station details"
+    _attr_icon = "mdi:refresh"
+    _attr_entity_category = EntityCategory.CONFIG
+
+    def __init__(self, coordinator: SolemCoordinator):
+        self.coordinator = coordinator
+        self._attr_unique_id = f"{coordinator.controller_mac_address}_refresh_station_details"
+        self._attr_device_info = {
+            "identifiers": {("solem_bluetooth_watering_controller", coordinator.controller_mac_address)}
+        }
+
+    async def async_press(self) -> None:
+        entry = self.coordinator.config_entry
+        details = await async_discover_station_details(
+            self.hass, dict(entry.data), self.coordinator.bluetooth_timeout
+        )
+        # The config-entry listener reloads entities after an actual change.
+        self.hass.config_entries.async_update_entry(entry, data=details)

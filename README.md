@@ -1,5 +1,18 @@
 # Home Assistant Solem Bluetooth Watering Controller Integration
 
+## Experimental station discovery
+
+The `experiment/station-discovery` branch reads station names and identification
+through the matching Toolkit branch. Setup accepts `0` for automatic station
+count; recognized V5 metadata supplies the count, otherwise enter it manually.
+The V5 count interpretation is experimental and unknown/conflicting replies
+retain the configured count. Unused name slots are not counted as stations.
+
+Existing entries discover details on their next load. **Refresh station details**
+reads them again; complete results are cached and entity identifiers stay stable.
+BLE failures retain the existing configuration. This reads metadata only and
+never sends a watering command.
+
 ## Stop-button reliability patch
 
 Stop now waits for completion, retries transient failures up to three times,
