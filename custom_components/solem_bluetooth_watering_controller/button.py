@@ -105,7 +105,8 @@ class IrrigationStopButton(SolemButtonEntity):
 
     async def async_press(self) -> None:
         """Handle the button press."""
-        asyncio.create_task(self.coordinator.stop_irrigation())
+        # Keep the service call open so HA can display a failed stop to the user.
+        await self.coordinator.stop_irrigation()
 
 class ControllerOnButton(SolemButtonEntity):
     """Button entity to manually stop irrigation."""

@@ -1,5 +1,24 @@
 # Home Assistant Solem Bluetooth Watering Controller Integration
 
+## Stop-button reliability patch
+
+Stop now waits for completion, retries transient failures up to three times,
+and reports the final error. Calls through this integration share a per-controller
+lock; starts are never automatically replayed. A successful stop immediately
+updates all station statuses and cancels the local timer without a weather fetch.
+Failures preserve the existing state. Configuration and entity IDs are unchanged.
+
+Pair this with the [Toolkit acknowledgement fix](https://github.com/ThomasHFWright/Home-Assistant-Solem-Toolkit/pull/1)
+to verify controller responses to start and stop commands.
+Station entities remain locally tracked between commands, not flow measurements.
+
+Run the mocked regression suite on Python 3.14 / Home Assistant 2026.9.2:
+
+```sh
+python -m pip install -r requirements-test.txt
+python -m pytest -q
+```
+
 [![hacs_badge](https://img.shields.io/badge/HACS-Default-41BDF5.svg)](https://github.com/hacs/integration)
 [![GitHub release](https://img.shields.io/github/release/hcraveiro/Home-Assistant-Solem-Bluetooth-Watering-Controller.svg)](https://github.com/hcraveiro/Home-Assistant-Solem-Bluetooth-Watering-Controller/releases/)
 

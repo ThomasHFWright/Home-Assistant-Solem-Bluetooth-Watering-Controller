@@ -2,19 +2,27 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import aiohttp
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.exceptions import (
+    HomeAssistantError,
+    ServiceNotFound,
+    ServiceValidationError,
+)
 from homeassistant.util.dt import as_local
 from homeassistant.util import dt as dt_util
 
-from .const import OPEN_WEATHER_MAP_CURRENT_URL, OPEN_WEATHER_MAP_FORECAST_URL
+from .const import DOMAIN, OPEN_WEATHER_MAP_CURRENT_URL, OPEN_WEATHER_MAP_FORECAST_URL
 
 _LOGGER = logging.getLogger(__name__)
+_COMMAND_LOCKS = f"{DOMAIN}_command_locks"
+_STOP_ATTEMPTS = 3
+_STOP_RETRY_DELAY = 1.0
 
 
 class SolemAPI:
@@ -34,8 +42,14 @@ class SolemAPI:
         self.mac_address = mac_address
         self.bluetooth_timeout = bluetooth_timeout
         self.mock = False
+        # Config flows and coordinators may each have an adapter for the same
+        # controller. Serialize their complete toolkit calls, including retries.
+        locks = hass.data.setdefault(_COMMAND_LOCKS, {})
+        self._command_lock = locks.setdefault((mac_address or "").upper(), asyncio.Lock())
 
-    async def _async_call_toolkit_service(self, service: str, data: dict[str, Any] | None = None) -> None:
+    async def _async_call_toolkit_service(
+        self, service: str, data: dict[str, Any] | None = None, *, attempts: int = 1
+    ) -> None:
         """Call a Solem Toolkit service and translate errors to APIConnectionError."""
         if self.mock:
             _LOGGER.debug("Mock=True, skipping toolkit service call: %s", service)
@@ -50,18 +64,30 @@ class SolemAPI:
         # Solem Toolkit supports an optional bluetooth_timeout field on services.
         payload = {"device_mac": self.mac_address, "bluetooth_timeout": self.bluetooth_timeout, **data}
 
-        try:
-            await self.hass.services.async_call(
-                self._TOOLKIT_DOMAIN,
-                service,
-                payload,
-                blocking=True,
-            )
-        except HomeAssistantError as exc:
-            raise APIConnectionError(str(exc)) from exc
-        except Exception as exc:
-            # This also catches ServiceNotFound and other runtime errors.
-            raise APIConnectionError(f"Error calling Solem Toolkit service '{service}': {exc}") from exc
+        async with self._command_lock:
+            for attempt in range(1, attempts + 1):
+                try:
+                    await self.hass.services.async_call(
+                        self._TOOLKIT_DOMAIN, service, payload, blocking=True
+                    )
+                    return
+                except (ServiceNotFound, ServiceValidationError) as exc:
+                    # Retrying missing services or invalid input cannot help.
+                    raise APIConnectionError(str(exc)) from exc
+                except HomeAssistantError as exc:
+                    if attempt == attempts:
+                        raise APIConnectionError(
+                            f"{service} failed after {attempt} attempt(s): {exc}"
+                        ) from exc
+                    _LOGGER.warning(
+                        "%s - %s attempt %s/%s failed: %s; retrying",
+                        self.mac_address, service, attempt, attempts, exc,
+                    )
+                    await asyncio.sleep(_STOP_RETRY_DELAY)
+                except Exception as exc:
+                    raise APIConnectionError(
+                        f"Error calling Solem Toolkit service '{service}': {exc}"
+                    ) from exc
 
     async def scan_bluetooth(self):
         """Scan for BLE devices.
@@ -99,7 +125,9 @@ class SolemAPI:
 
     async def stop_manual_sprinkle(self) -> None:
         """Stop a running manual sprinkle."""
-        await self._async_call_toolkit_service("stop_manual_sprinkle")
+        # Stop is idempotent. Retrying a start could extend watering, so only
+        # stop gets whole-command retries (a fresh BLE session each time).
+        await self._async_call_toolkit_service("stop_manual_sprinkle", attempts=_STOP_ATTEMPTS)
 
     async def list_characteristics(self) -> None:
         """List GATT characteristics (logs are written by Solem Toolkit)."""
