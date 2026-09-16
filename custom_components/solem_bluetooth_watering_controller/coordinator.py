@@ -15,6 +15,7 @@ from homeassistant.const import (
     CONF_SCAN_INTERVAL,
 )
 from homeassistant.core import DOMAIN, HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.helpers.event import async_track_time_change
 from homeassistant.helpers.event import async_call_later
@@ -1093,6 +1094,8 @@ class SolemCoordinator(DataUpdateCoordinator):
                 _LOGGER.info(f"{self.controller_mac_address} - Irrigation cancelation triggered.")
                 break
             await sleep(1)  # Validate every second
+            if self.irrigation_stop_event.is_set():
+                break
             self.total_water_consumption += (self.water_flow_rate[station - 1] / 60)
             
             # Calculate mm of water applied
@@ -1119,8 +1122,10 @@ class SolemCoordinator(DataUpdateCoordinator):
         try:
             await self.api.stop_manual_sprinkle()
         except APIConnectionError as ex:
-            _LOGGER.error(f"{self.controller_mac_address} - Failed due to connection error.")
-            return
+            _LOGGER.error("%s - Unable to stop watering: %s", self.controller_mac_address, ex)
+            # Do not claim the valves stopped or cancel the local timer on a
+            # failed command. Surface the failure through button.press instead.
+            raise HomeAssistantError(f"Unable to stop Solem watering: {ex}") from ex
 
         # Trigger event to stop sprinkling task
         self.irrigation_stop_event.set()
@@ -1129,7 +1134,14 @@ class SolemCoordinator(DataUpdateCoordinator):
             self.stations[station_id - 1].state = "Stopped"
 
         _LOGGER.info(f"{self.controller_mac_address} - Stopped watering.")
-        data = await self.async_update_all_sensors()
+        # Publish immediately. A weather API failure must not leave station
+        # entities at Sprinkling after the stop command has completed.
+        station_ids = {station.device_id for station in self.stations}
+        data = [
+            {**device, "state": "Stopped"}
+            if device["device_id"] in station_ids else device
+            for device in (self.data or [])
+        ]
         self.async_set_updated_data(data)
     
     async def turn_controller_on(self):
