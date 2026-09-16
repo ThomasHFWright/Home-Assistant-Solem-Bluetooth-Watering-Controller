@@ -158,7 +158,9 @@ class SolemCoordinator(DataUpdateCoordinator):
         self.sprinkle_target_amount_today = [0.0] * self.num_stations
         self.forecasted_sprinkle_today = [0.0] * self.num_stations
         
-        self.init_task = hass.async_create_task(self.async_init())
+        self.init_task = config_entry.async_create_background_task(
+            hass, self.async_init(), "Solem initialization", eager_start=False
+        )
     
         _LOGGER.info(f"{self.controller_mac_address} - Coordinator initialization finished!")
 
@@ -374,16 +376,16 @@ class SolemCoordinator(DataUpdateCoordinator):
         """Create scheduled tasks."""
         
         _LOGGER.info(f"{self.controller_mac_address} - Scheduling tasks for midnight...")
-        async_track_time_change(
+        self.config_entry.async_on_unload(async_track_time_change(
             self.hass,
             lambda *_: self.hass.create_task(self.reset_rain_sprinkle_indicators()),
             hour=0, minute=0, second=0
-        )
-        async_track_time_change(
+        ))
+        self.config_entry.async_on_unload(async_track_time_change(
             self.hass,
             lambda *_: self.hass.create_task(self.check_and_schedule_watering()),
             hour=0, minute=1, second=0
-        )
+        ))
         _LOGGER.info(f"{self.controller_mac_address} - Scheduled tasks.")
 
     async def async_init(self):
@@ -550,7 +552,9 @@ class SolemCoordinator(DataUpdateCoordinator):
                 watering_time = dt_util.as_local(datetime.combine(today, parse_time_string(hour)))
                 delay = (watering_time - dt_util.now()).total_seconds()
                 if delay > 0:
-                    async_call_later(self.hass, delay, self.run_watering_cycle)
+                    self.config_entry.async_on_unload(
+                        async_call_later(self.hass, delay, self.run_watering_cycle)
+                    )
                     _LOGGER.info(f"{self.controller_mac_address} - Watering scheduled for {watering_time}")
             except ValueError:
                 _LOGGER.error(f"{self.controller_mac_address} - Invalid hour format: {hour}")

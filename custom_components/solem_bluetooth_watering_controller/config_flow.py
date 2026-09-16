@@ -69,7 +69,7 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
         # ----------------------------------------------------------------------------
         mac_address = data[CONTROLLER_MAC_ADDRESS].rsplit(' - ', 1)
         _LOGGER.debug(mac_address)
-        details = await async_discover_station_details(hass, data)
+        details = await async_discover_station_details(hass, data, allow_manual_fallback=True)
         data.update(details)
         _LOGGER.debug(f"Connected to Bluetooth controller {mac_address[1]}")
     except (APIConnectionError, HomeAssistantError) as err:

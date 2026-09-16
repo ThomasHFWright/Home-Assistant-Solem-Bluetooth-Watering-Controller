@@ -10,7 +10,9 @@ retain the configured count. Unused name slots are not counted as stations.
 
 Existing entries discover details on their next load. **Refresh station details**
 reads them again; complete results are cached and entity identifiers stay stable.
-BLE failures retain the existing configuration. This reads metadata only and
+Manual setup can use default station names when metadata is unsupported, after
+a separate connectivity check. Refresh failures retain the existing configuration.
+Reloading cancels the old scheduled callbacks and initialization task. This reads metadata only and
 never sends a watering command.
 
 ## Stop-button reliability patch

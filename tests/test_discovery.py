@@ -77,3 +77,57 @@ def test_station_display_name_has_manual_fallback():
     coordinator.config_entry = SimpleNamespace(data={"station_names": {"1": "Front lawn"}})
     assert coordinator.station_name(1) == "Front lawn"
     assert coordinator.station_name(2) == "Station 2"
+
+
+@pytest.mark.parametrize("reply", [
+    HomeAssistantError("Metadata not supported"),
+    {"station_count": None, "station_names": {}},
+    None,
+])
+async def test_manual_setup_works_without_name_support_after_connectivity_check(reply):
+    hass = SimpleNamespace(data={}, services=SimpleNamespace(async_call=AsyncMock(side_effect=[reply, None])))
+    data = {**DATA, "num_stations": 2}
+    await validate_input(hass, data)
+    assert data["num_stations"] == 2
+    assert data["station_names"] == {"1": "Station 1", "2": "Station 2"}
+    assert data["station_count_source"] == "manual"
+    assert [c.args[1] for c in hass.services.async_call.await_args_list] == ["read_metadata", "list_characteristics"]
+
+
+async def test_manual_setup_still_rejects_unreachable_device():
+    from custom_components.solem_bluetooth_watering_controller.config_flow import CannotConnect
+
+    hass = SimpleNamespace(data={}, services=SimpleNamespace(async_call=AsyncMock(side_effect=HomeAssistantError("offline"))))
+    data = dict(DATA)
+    with pytest.raises(CannotConnect):
+        await validate_input(hass, data)
+    assert data == DATA
+    assert hass.services.async_call.await_count == 2
+
+
+async def test_automatic_setup_cannot_silently_fall_back_to_one_station():
+    from custom_components.solem_bluetooth_watering_controller.config_flow import CannotConnect
+
+    hass = SimpleNamespace(services=SimpleNamespace(async_call=AsyncMock(side_effect=HomeAssistantError("unsupported"))))
+    with pytest.raises(CannotConnect):
+        await validate_input(hass, {**DATA, "num_stations": 0})
+    assert hass.services.async_call.await_count == 1
+
+
+async def test_refresh_remains_strict_and_keeps_cached_names():
+    from custom_components.solem_bluetooth_watering_controller.button import RefreshStationDetailsButton
+    from unittest.mock import Mock
+
+    data = {**DATA, "station_names": {"1": "Existing garden"}}
+    hass = SimpleNamespace(
+        services=SimpleNamespace(async_call=AsyncMock(return_value={"station_names": {}})),
+        config_entries=SimpleNamespace(async_update_entry=Mock()),
+    )
+    coordinator = SimpleNamespace(controller_mac_address="AA:BB:CC:DD:EE:FF", bluetooth_timeout=15,
+                                  config_entry=SimpleNamespace(data=data))
+    button = RefreshStationDetailsButton(coordinator)
+    button.hass = hass
+    with pytest.raises(HomeAssistantError, match="Incomplete"):
+        await button.async_press()
+    hass.config_entries.async_update_entry.assert_not_called()
+    assert data["station_names"] == {"1": "Existing garden"}
