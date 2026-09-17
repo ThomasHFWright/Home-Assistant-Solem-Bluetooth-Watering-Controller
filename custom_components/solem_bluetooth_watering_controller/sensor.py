@@ -86,6 +86,7 @@ class StateSensor(SolemBaseEntity, SensorEntity):
     def extra_state_attributes(self):
         attrs = {}
         if self.coordinator.controller.device_name == "Controller Status":
+            attrs["controller_mac_address"] = self.coordinator.controller_mac_address
             attrs["schedule"] = self.coordinator.schedule
             attrs["num_stations"] = self.coordinator.num_stations
             attrs["station_names"] = self.coordinator.config_entry.data.get("station_names", {})

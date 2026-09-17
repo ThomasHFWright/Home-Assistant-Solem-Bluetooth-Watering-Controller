@@ -21,6 +21,7 @@ from homeassistant.helpers.event import async_track_time_change
 from homeassistant.helpers.event import async_call_later
 
 from .util import mac_to_uuid, ensure_datetime, ensure_aware, parse_time_string
+from .schedule import validate_schedule
 from .models import IrrigationController, IrrigationStation
 from .api import SolemAPI, OpenWeatherMapAPI, APIConnectionError
 from .const import (
@@ -134,6 +135,9 @@ class SolemCoordinator(DataUpdateCoordinator):
         self.irrigation_stop_event = asyncio.Event()
         
         # ---- Default init for attributes to avoid race conditions ----
+        self._watering_timers = []
+        self._schedule_lock = asyncio.Lock()
+        config_entry.async_on_unload(self._cancel_watering_timers)
         self.schedule: list[dict[str, Any]] | None = None
         self.next_schedule: datetime | None = None
         
@@ -493,10 +497,17 @@ class SolemCoordinator(DataUpdateCoordinator):
         return False
 
 
+    def _cancel_watering_timers(self):
+        """Cancel future runs, leaving any already-running cycle alone."""
+        for cancel in self._watering_timers:
+            cancel()
+        self._watering_timers.clear()
+
     async def check_and_schedule_watering(self, *_):
         """Check if there should be watering today and schedule the tasks."""
         _LOGGER.info(f"{self.controller_mac_address} - Checking and scheduling watering times...")
     
+        self._cancel_watering_timers()
         if not self.schedule:
             _LOGGER.warning(f"{self.controller_mac_address} - Schedule not initialized, skipping watering check.")
             return
@@ -504,16 +515,16 @@ class SolemCoordinator(DataUpdateCoordinator):
         today = dt_util.now().date()
         current_month_index = today.month - 1
     
-        # Find a month with valid config and hours
-        for i in range(12):
-            month_config = self.schedule[(current_month_index + i) % 12]
-            hours_raw = month_config.get("hours", []) or []
-            if month_config and hours_raw:
-                break
-        else:
-            _LOGGER.info(f"{self.controller_mac_address} - No valid configuration found for any month.")
+        self.sprinkle_target_amount_today = await self.calculate_sprinkle_target_amounts()
+        self.forecasted_sprinkle_today = [
+            max(0, target - self.rain_total_amount_forecasted_today)
+            for target in self.sprinkle_target_amount_today
+        ]
+        month_config = self.schedule[current_month_index]
+        hours_raw = month_config.get("hours", []) or []
+        if not hours_raw:
             return
-    
+
         interval_days = month_config.get("interval_days", 2)
     
         last_rain = ensure_aware(self.last_rain)
@@ -549,10 +560,10 @@ class SolemCoordinator(DataUpdateCoordinator):
     
         for hour in watering_hours:
             try:
-                watering_time = dt_util.as_local(datetime.combine(today, parse_time_string(hour)))
+                watering_time = datetime.combine(today, parse_time_string(hour), dt_util.DEFAULT_TIME_ZONE)
                 delay = (watering_time - dt_util.now()).total_seconds()
                 if delay > 0:
-                    self.config_entry.async_on_unload(
+                    self._watering_timers.append(
                         async_call_later(self.hass, delay, self.run_watering_cycle)
                     )
                     _LOGGER.info(f"{self.controller_mac_address} - Watering scheduled for {watering_time}")
@@ -562,73 +573,25 @@ class SolemCoordinator(DataUpdateCoordinator):
         _LOGGER.debug(f"{self.controller_mac_address} - Scheduled watering.")
         
 
-    async def get_next_watering_date(self) -> datetime:
-        """
-        Get next watering time considering configurations.
-        """
-        _LOGGER.debug(f"{self.controller_mac_address} - Determining next watering schedule...")
-        
+    async def get_next_watering_date(self) -> datetime | None:
+        """Find the next local start using the configuration of that date's month."""
         if not self.schedule:
-            _LOGGER.debug(f"{self.controller_mac_address} - Schedule not initialized yet.")
             return None
-
-        today = dt_util.now().date()
-        current_month_index = today.month - 1
-    
-        # Procurar um mês com configuração e horários definidos
-        for i in range(12):
-            month_config = self.schedule[(current_month_index + i) % 12]
-            watering_hours = month_config.get("hours", [])
-    
-            if month_config and watering_hours:  # Só considera meses com horários definidos
-                break
-        else:
-            _LOGGER.debug(f"{self.controller_mac_address} - No configuration with valid hours found for any month.")
-            return None
-    
-        interval_days = month_config.get("interval_days", 2)
-    
-        # Se choveu ou vai chover, adia a rega
-        if self.has_rained_today or self.will_it_rain_today or self.is_raining_now:
-            _LOGGER.debug(f"{self.controller_mac_address} - No watering today due to rain.")
-            next_watering_day = today + timedelta(days=interval_days)
-        else:
-            next_watering_day = today
-    
-        # Se já houve chuva ou rega recente, respeita o intervalo
-        if self.last_rain or self.last_sprinkle:
-            last_event_date = max(filter(None, [self.last_rain, self.last_sprinkle]))
-            days_since_last_event = (today - last_event_date.date()).days
-            if days_since_last_event < interval_days:
-                next_watering_day = last_event_date.date() + timedelta(days=interval_days)
-    
-        # Garantir que estamos num mês com horários configurados
-        while not self.schedule[next_watering_day.month - 1].get("hours", []):
-            next_watering_day += timedelta(days=1)
-    
-        # Determinar a próxima hora válida
-        for hour in watering_hours:
-            try:
-                next_watering_time = parse_time_string(hour)
-                next_watering_datetime = datetime.combine(next_watering_day, next_watering_time)
-                next_watering_datetime = dt_util.as_local(next_watering_datetime)
-    
-                if next_watering_datetime > dt_util.now():
-                    return next_watering_datetime
-            except ValueError:
-                _LOGGER.error(f"{self.controller_mac_address} - Invalid hour format: {hour}")
-    
-        _LOGGER.debug(f"{self.controller_mac_address} - Determined next watering schedule.")
-    
-        # Se não houver horas válidas, evitar erro de índice e retornar None
-        if not watering_hours:
-            return None
-    
-        fallback_time = datetime.combine(
-            next_watering_day + timedelta(days=1),
-            parse_time_string(watering_hours[0])
-        )
-        return dt_util.as_local(fallback_time)
+        now = dt_util.now()
+        last_event = max(filter(None, [self.last_rain, self.last_sprinkle]), default=None)
+        # One interval plus a full year covers even a single enabled month.
+        for offset in range(732):
+            day = now.date() + timedelta(days=offset)
+            month = self.schedule[day.month - 1]
+            if last_event and (day - last_event.date()).days < month.get("interval_days", 0):
+                continue
+            if offset == 0 and (self.has_rained_today or self.will_it_rain_today or self.is_raining_now):
+                continue
+            for hour in sorted(month.get("hours", []), key=parse_time_string):
+                start = datetime.combine(day, parse_time_string(hour), dt_util.DEFAULT_TIME_ZONE)
+                if start > now:
+                    return start
+        return None
 
     async def run_watering_cycle(self, *_):
         """Run the scheduled watering cycle if all conditions are met."""
@@ -1183,20 +1146,21 @@ class SolemCoordinator(DataUpdateCoordinator):
 
 
     async def async_set_schedule(self, new_schedule):
-        """Replaces irrigation schedule from frontend card"""
-        
-        # Atualiza a variável interna para refletir a nova configuração
-        self.schedule = new_schedule
-        
-        await self.save_persistent_data()
+        """Persist a validated schedule and immediately replace future timers."""
+        schedule = validate_schedule(new_schedule, self.num_stations)
+        await self.init_task
+        async with self._schedule_lock:
+            previous = self.schedule
+            self.schedule = schedule
+            try:
+                await self.save_persistent_data()
+            except Exception:
+                self.schedule = previous
+                raise
+            await self.check_and_schedule_watering()
+            data = await self.async_update_all_sensors()
+            self.async_set_updated_data(data)
 
-        # Atualiza os sensores
-        data = await self.async_update_all_sensors()
-        self.async_set_updated_data(data)
-
-        _LOGGER.info(f"{self.controller_mac_address} - Updated schedule.")
-
-    
     async def initialize_schedule(self):
         """Initialize the schedule if not already set"""
         _LOGGER.info(f"{self.controller_mac_address} - Initializing schedule...")

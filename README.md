@@ -92,3 +92,11 @@ There is a number of sensors that are mande available for each controller/config
 ### Can I configure other controller models?
 
 Not, yet, I haven't reverse engineered yet other controllers other than BLIP.I'm planning to do it on BLNR soon, though.
+
+## Schedule editor branch
+
+The `fix/schedule-editor` branch works with the [updated Solem Schedule Card](https://github.com/ThomasHFWright/solem-schedule-card/tree/fix/schedule-editor), including renamed controller entities and discovered station names.
+
+Schedule saves validate all twelve months and immediately replace pending watering timers. Clearing a month's start times disables automatic watering for that month. Times use Home Assistant's local timezone, and an empty month no longer borrows another month's settings. Saving does not send a stop command for an active cycle.
+
+These are Home Assistant schedules, not programs uploaded to the controller. Home Assistant and its Bluetooth connection must be available at watering time; MySOLEM app schedules remain separate. Existing rain and soil-moisture logic can reduce or skip watering.

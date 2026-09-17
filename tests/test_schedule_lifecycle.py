@@ -18,7 +18,13 @@ def make_coordinator(hass):
     coordinator.hass = hass
     coordinator.config_entry = entry
     coordinator.controller_mac_address = "AA:BB:CC:DD:EE:FF"
-    coordinator.schedule = [{"hours": ["12:00"], "interval_days": 0}] * 12
+    coordinator._watering_timers = []
+    entry.async_on_unload(coordinator._cancel_watering_timers)
+    coordinator.num_stations = 1
+    coordinator.water_flow_rate = [12]
+    coordinator.station_areas = [1]
+    coordinator.rain_total_amount_forecasted_today = 0
+    coordinator.schedule = [{"hours": ["12:00"], "interval_days": 0, "stations": {"station_1_minutes": 1}}] * 12
     coordinator.last_rain = coordinator.last_sprinkle = dt_util.now() - timedelta(days=1)
     coordinator.needs_watering_today = lambda: True
     return coordinator
